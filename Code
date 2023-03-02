@@ -1,0 +1,72 @@
+import reservoirpy as rpy
+import numpy as np
+import matplotlib.pyplot as plt
+from reservoirpy.nodes import Reservoir
+from reservoirpy.nodes import Ridge 
+import os
+from reservoirpy.datasets import mackey_glass
+from reservoirpy.observables import nrmse, rsquare
+from reservoirpy.datasets import to_forecasting
+import pandas as pd
+from natsort import natsorted
+from sklearn.linear_model import Ridge as Ridge_sklearn
+
+timesteps = 2510
+tau = 20
+X = mackey_glass(timesteps, tau=tau)
+# rescale between -1 and 1
+X = 2 * (X - X.min()) / (X.max() - X.min()) - 1
+
+#Bulding ESN
+units = 200 #number of neurons 
+leak_rate = 0.3
+spectral_radius = 1.25
+input_scaling = 1.0
+connectivity = 0.1
+input_connectivity = 0.2
+regularization = 1e-8
+seed = 1234
+
+reservoir = Reservoir(units, input_scaling=input_scaling, sr=spectral_radius,
+                      lr=leak_rate, rc_connectivity=connectivity,
+                      input_connectivity=input_connectivity, seed=seed)
+
+readout   = Ridge(1, ridge=regularization)
+esn = reservoir >> readout
+
+#Split data into training and testing sets
+def split_data_time_series(X,split_decimal):
+  split_index = int(split_decimal * len(X))
+  window_size = len(X) - split_index
+  train_data = X[:split_index]
+  test_data = X[split_index-window_size:] 
+
+  X_train = []
+  y_train = []
+  for i in range(window_size, len(train_data)):
+    X_train.append(train_data[i-window_size:i,0])
+    y_train.append(train_data[i,0])
+      
+  X_train = np.array(X_train).reshape(-1, window_size)
+  y_train = np.array(y_train)
+
+  X_test = [] 
+  y_test = X[split_index:] 
+  for i in range(window_size, len(test_data)):
+    X_test.append(test_data[i-window_size:i,0]) 
+  X_test = np.array(X_test).reshape(-1, window_size)  
+  y_test = np.array(y_test)
+  
+
+  return(X_train,y_train,X_test,y_test,train_data,split_index,window_size) 
+
+X_train,y_train,X_test,y_test,train_data,split_index,window_size = split_data_time_series(X,split_decimal = 0.99)
+
+# Train ESN model and plot the results
+# X_train = X_train.reshape(1,1,X_train.shape[0],X_train.shape[1])
+# y_train = y_train.reshape(1,1,y_train.shape[0],1)
+print(np.shape(X_train))
+print(np.shape(y_train))
+
+# X_test = X_test.reshape(1,1,X_test.shape[0], X_test.shape[1])
+y_pred_esn = esn.fit(X_train, y_train).run(X_test)
